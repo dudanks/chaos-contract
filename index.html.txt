@@ -1,19 +1,19 @@
-
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>CHAOS CONTRACT — Ultimate Standalone</title>
-<script src="https://unpkg.com/tmi.js@1.8.5/dist/tmi.min.js"></script>
+<title>Chaos Contract</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <style>
-body{margin:0;background:#000;color:#eee;font-family:monospace;text-align:center;overflow:hidden;}
-canvas{display:block;margin:auto;background:#111;}
-#ui{padding:8px;}
-#announcer{color:#ff5555;font-size:14px;height:22px;}
-#overlay{position:fixed;top:10px;right:10px;text-align:right;font-size:12px;color:#0f0;}
-.glitch{animation:glitch 0.2s infinite;}
-@keyframes glitch{0%{transform:translate(1px,1px);}50%{transform:translate(-1px,-1px);}}
-#clipFlash{position:fixed;top:0;left:0;width:100%;height:100%;background:red;opacity:0;pointer-events:none;z-index:9999;}
+body { margin:0; background:#000; color:#eee; font-family:monospace; overflow:hidden; }
+canvas { display:block; width:100vw; height:100vh; background:#111; }
+#ui { position:absolute; top:0; left:0; width:100%; padding:8px; z-index:10; box-sizing:border-box; }
+#announcer { color:#ff5555; font-size:14px; height:22px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+#choices div{margin:2px; font-size:14px;}
+#overlay { position:fixed; top:10px; right:10px; text-align:right; font-size:12px; color:#0f0; z-index:10; max-width:45%; word-wrap:break-word; }
+.glitch { animation:glitch 0.2s infinite; }
+@keyframes glitch { 0%{transform:translate(1px,1px);}50%{transform:translate(-1px,-1px);} }
+#clipFlash { position:fixed; top:0; left:0; width:100%; height:100%; background:red; opacity:0; pointer-events:none; z-index:9999; }
 </style>
 </head>
 <body>
@@ -33,7 +33,7 @@ canvas{display:block;margin:auto;background:#111;}
   <div id="donation">DONATIONS: 0 | SUB/VIP PERKS: 0</div>
 </div>
 
-<canvas id="game" width="500" height="500"></canvas>
+<canvas id="game"></canvas>
 <div id="clipFlash"></div>
 
 <script>
@@ -41,7 +41,16 @@ canvas{display:block;margin:auto;background:#111;}
 const canvas = document.getElementById("game");
 const ctx = canvas.getContext("2d");
 
-// AUTOMATIC DAILY SEED (per player, based on current date)
+// FULLSCREEN CANVAS + DYNAMIC SCALING
+function resizeCanvas(){
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+  player.x = canvas.width/2 - player.w/2;
+  player.y = canvas.height - 50;
+}
+window.addEventListener("resize", resizeCanvas);
+
+// AUTOMATIC DAILY SEED
 function getDailySeed() {
   const today = new Date();
   return today.toISOString().slice(0,10); // YYYY-MM-DD
@@ -49,7 +58,7 @@ function getDailySeed() {
 let seed = getDailySeed();
 let rng = mulberry32(hash(seed));
 
-let player={x:240,y:450,w:20,h:20,speed:5};
+let player={x:0,y:0,w:20,h:20,speed:5};
 let objects=[];
 let gravity=0.6;
 let inverted=false;
@@ -88,10 +97,19 @@ document.addEventListener("keydown",e=>{
   if(gameOver)return;
   if(e.key==="ArrowLeft")player.x+=inverted?player.speed:-player.speed;
   if(e.key==="ArrowRight")player.x+=inverted?-player.speed:player.speed;
+  if(voting){ if(e.key==="1")votes[1]++; if(e.key==="2")votes[2]++; }
 });
 
 // ===================== SPAWN & COLLISIONS =====================
-function spawnObject(){ objects.push({x:rng()*480,y:-30,w:20+rng()*30,h:20+rng()*30,vy:2+rng()*4*anger}); }
+function spawnObject(){ 
+  objects.push({
+    x:rng()*(canvas.width-50),
+    y:-30,
+    w:20+rng()*30,
+    h:20+rng()*30,
+    vy:2+rng()*4*anger
+  }); 
+}
 function collide(a,b){ return a.x<b.x+b.w && a.x+a.w>b.x && a.y<b.y+b.h && a.y+a.h>b.y; }
 
 // ===================== CONTRACTS & VOTING =====================
@@ -127,6 +145,27 @@ function clipFlash(color="red",duration=300){
   setTimeout(()=>{ flash.style.transition="opacity 0.3s"; flash.style.opacity=0; setTimeout(()=>flash.style.transition="",100); },duration);
 }
 
+// ===================== MOBILE TOUCH CONTROLS =====================
+let touchStartX = null;
+let touchMoveX = null;
+canvas.addEventListener("touchstart", e => {
+  if(gameOver) return;
+  touchStartX = e.touches[0].clientX;
+  touchMoveX = touchStartX;
+  movePlayerByTouch(touchMoveX);
+});
+canvas.addEventListener("touchmove", e => {
+  if(gameOver) return;
+  touchMoveX = e.touches[0].clientX;
+  movePlayerByTouch(touchMoveX);
+});
+canvas.addEventListener("touchend", e => { touchStartX=null; touchMoveX=null; });
+function movePlayerByTouch(x){
+  if(x<canvas.width/2) player.x += inverted ? player.speed : -player.speed;
+  else player.x += inverted ? -player.speed : player.speed;
+  player.x = Math.max(0, Math.min(player.x, canvas.width - player.w));
+}
+
 // ===================== UPDATE LOOP =====================
 function update(){
   if(gameOver)return;
@@ -134,19 +173,17 @@ function update(){
   if(time%500===0) offerContract();
   if(rng()<0.03*anger) spawnObject();
 
-  ctx.clearRect(0,0,500,500);
+  ctx.clearRect(0,0,canvas.width,canvas.height);
 
-  if(lava){ ctx.fillStyle="orange"; ctx.fillRect(0,470,500,30); if(player.y+player.h>470){ clipFlash("red"); end(); } }
+  if(lava){ ctx.fillStyle="orange"; ctx.fillRect(0,canvas.height-30,canvas.width,30); if(player.y+player.h>canvas.height-30){ clipFlash("red"); end(); } }
   ctx.fillStyle="#0f0"; ctx.fillRect(player.x,player.y,player.w,player.h);
   ctx.fillStyle="#f00";
   objects.forEach(o=>{ o.vy+=gravity; o.y+=o.vy; ctx.fillRect(o.x,o.y,o.w,o.h); if(collide(player,o)){ clipFlash("red"); end(); } });
 
-  // AUDIO EFFECTS
   if(horror>=2 && Math.random()<0.003) playWhisper();
   if(horror>=4 && Math.random()<0.002) playGlitch();
   playHeartbeat();
 
-  // SCREEN WHISPERS
   if(horror>=3 && Math.random()<0.005){
     const wisp=document.createElement("div");
     wisp.innerText="…it sees you…";
@@ -161,7 +198,6 @@ function update(){
     clipFlash("pink",150);
   }
 
-  // OVERLAY UPDATE
   document.getElementById("time").innerText="TIME: "+Math.floor(time/60);
   document.getElementById("anger").innerText="ANGER: "+anger.toFixed(1);
   document.getElementById("horror").innerText="HORROR: "+horror;
@@ -202,6 +238,8 @@ if(CHANNEL){
     if(msg==="!donate"){ anger+=0.5; donationCount++; say("THE CONTRACT THANKS YOU."); clipFlash("gold"); }
   });
 }
+
+resizeCanvas();
 </script>
 
 </body>
