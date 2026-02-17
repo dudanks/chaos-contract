@@ -1,0 +1,208 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>CHAOS CONTRACT — Ultimate Standalone</title>
+<script src="https://unpkg.com/tmi.js@1.8.5/dist/tmi.min.js"></script>
+<style>
+body{margin:0;background:#000;color:#eee;font-family:monospace;text-align:center;overflow:hidden;}
+canvas{display:block;margin:auto;background:#111;}
+#ui{padding:8px;}
+#announcer{color:#ff5555;font-size:14px;height:22px;}
+#overlay{position:fixed;top:10px;right:10px;text-align:right;font-size:12px;color:#0f0;}
+.glitch{animation:glitch 0.2s infinite;}
+@keyframes glitch{0%{transform:translate(1px,1px);}50%{transform:translate(-1px,-1px);}}
+#clipFlash{position:fixed;top:0;left:0;width:100%;height:100%;background:red;opacity:0;pointer-events:none;z-index:9999;}
+</style>
+</head>
+<body>
+
+<div id="ui">
+  <h2>CHAOS CONTRACT</h2>
+  <div id="announcer">The contract is watching.</div>
+  <div id="choices"></div>
+</div>
+
+<div id="overlay">
+  <div id="time">TIME: 0</div>
+  <div id="anger">ANGER: 1</div>
+  <div id="horror">HORROR: 0</div>
+  <div id="daily">DAILY SEED: </div>
+  <div id="voteDisplay">VOTES: 1️⃣ 0 | 2️⃣ 0</div>
+  <div id="donation">DONATIONS: 0 | SUB/VIP PERKS: 0</div>
+</div>
+
+<canvas id="game" width="500" height="500"></canvas>
+<div id="clipFlash"></div>
+
+<script>
+// ===================== GAME STATE =====================
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+
+// AUTOMATIC DAILY SEED (per player, based on current date)
+function getDailySeed() {
+  const today = new Date();
+  return today.toISOString().slice(0,10); // YYYY-MM-DD
+}
+let seed = getDailySeed();
+let rng = mulberry32(hash(seed));
+
+let player={x:240,y:450,w:20,h:20,speed:5};
+let objects=[];
+let gravity=0.6;
+let inverted=false;
+let lava=false;
+let anger=1;
+let time=0;
+let gameOver=false;
+let horror=0;
+
+let voting=false;
+let votes={1:0,2:0};
+let voteTimer=null;
+let donationCount=0;
+let subCount=0;
+
+const announcer=document.getElementById("announcer");
+
+// ===================== WEB AUDIO GENERATOR =====================
+const audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+function playBeep(freq,duration,volume=0.1){
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.connect(gain); gain.connect(audioCtx.destination);
+  osc.type='sine';
+  osc.frequency.value=freq;
+  gain.gain.value=volume;
+  osc.start(); osc.stop(audioCtx.currentTime+duration);
+}
+function playWhisper(){ playBeep(200+Math.random()*400,0.1,0.05);}
+function playGlitch(){ playBeep(500+Math.random()*800,0.05,0.08);}
+function playHeartbeat(){ playBeep(60+anger*20,0.15,0.1);}
+
+// ===================== UTILITIES =====================
+function say(msg){ announcer.innerText=msg; if(horror>=3) announcer.classList.add("glitch"); setTimeout(()=>announcer.classList.remove("glitch"),300);}
+document.addEventListener("keydown",e=>{
+  if(gameOver)return;
+  if(e.key==="ArrowLeft")player.x+=inverted?player.speed:-player.speed;
+  if(e.key==="ArrowRight")player.x+=inverted?-player.speed:player.speed;
+});
+
+// ===================== SPAWN & COLLISIONS =====================
+function spawnObject(){ objects.push({x:rng()*480,y:-30,w:20+rng()*30,h:20+rng()*30,vy:2+rng()*4*anger}); }
+function collide(a,b){ return a.x<b.x+b.w && a.x+a.w>b.x && a.y<b.y+b.h && a.y+a.h>b.y; }
+
+// ===================== CONTRACTS & VOTING =====================
+function offerContract(){
+  say("CHAT DECIDES.");
+  voting=true; votes={1:0,2:0};
+  const options=[
+    {t:"Invert controls", f:()=>invert(10000)},
+    {t:"Increase anger", f:()=>anger+=0.4},
+    {t:"Floor is lava", f:()=>lavaOn(10000)},
+    {t:"Horror spike", f:()=>horror+=1}
+  ];
+  const picked=options.sort(()=>0.5-rng()).slice(0,2);
+  document.getElementById("choices").innerHTML=
+    `<div>1️⃣ ${picked[0].t}</div><div>2️⃣ ${picked[1].t}</div><div id="voteBox">VOTES: 1️⃣ 0 | 2️⃣ 0</div>`;
+  voteTimer=setTimeout(()=>{
+    voting=false;
+    const winner=votes[1]>=votes[2]?picked[0]:picked[1];
+    say("CHAT CHOSE.");
+    winner.f();
+    clipFlash("purple");
+    document.getElementById("choices").innerHTML="";
+  },8000);
+}
+function invert(ms){ inverted=true; setTimeout(()=>inverted=false,ms);}
+function lavaOn(ms){ lava=true; setTimeout(()=>lava=false,ms);}
+
+// ===================== CLIP FLASH =====================
+function clipFlash(color="red",duration=300){
+  const flash = document.getElementById("clipFlash");
+  flash.style.background=color;
+  flash.style.opacity=0.6;
+  setTimeout(()=>{ flash.style.transition="opacity 0.3s"; flash.style.opacity=0; setTimeout(()=>flash.style.transition="",100); },duration);
+}
+
+// ===================== UPDATE LOOP =====================
+function update(){
+  if(gameOver)return;
+  time++;
+  if(time%500===0) offerContract();
+  if(rng()<0.03*anger) spawnObject();
+
+  ctx.clearRect(0,0,500,500);
+
+  if(lava){ ctx.fillStyle="orange"; ctx.fillRect(0,470,500,30); if(player.y+player.h>470){ clipFlash("red"); end(); } }
+  ctx.fillStyle="#0f0"; ctx.fillRect(player.x,player.y,player.w,player.h);
+  ctx.fillStyle="#f00";
+  objects.forEach(o=>{ o.vy+=gravity; o.y+=o.vy; ctx.fillRect(o.x,o.y,o.w,o.h); if(collide(player,o)){ clipFlash("red"); end(); } });
+
+  // AUDIO EFFECTS
+  if(horror>=2 && Math.random()<0.003) playWhisper();
+  if(horror>=4 && Math.random()<0.002) playGlitch();
+  playHeartbeat();
+
+  // SCREEN WHISPERS
+  if(horror>=3 && Math.random()<0.005){
+    const wisp=document.createElement("div");
+    wisp.innerText="…it sees you…";
+    wisp.style.position="absolute";
+    wisp.style.left=`${Math.random()*400}px`;
+    wisp.style.top=`${Math.random()*400}px`;
+    wisp.style.color="#ff5555";
+    wisp.style.opacity=0.5;
+    wisp.style.fontSize=`${10+Math.random()*20}px`;
+    document.body.appendChild(wisp);
+    setTimeout(()=>document.body.removeChild(wisp),1500);
+    clipFlash("pink",150);
+  }
+
+  // OVERLAY UPDATE
+  document.getElementById("time").innerText="TIME: "+Math.floor(time/60);
+  document.getElementById("anger").innerText="ANGER: "+anger.toFixed(1);
+  document.getElementById("horror").innerText="HORROR: "+horror;
+  document.getElementById("daily").innerText="DAILY SEED: "+seed;
+  document.getElementById("voteDisplay").innerText=`VOTES: 1️⃣ ${votes[1]} | 2️⃣ ${votes[2]}`;
+  document.getElementById("donation").innerText=`DONATIONS: ${donationCount} | SUB/VIP PERKS: ${subCount}`;
+
+  requestAnimationFrame(update);
+}
+function end(){
+  gameOver=true;
+  const score=Math.floor(time/60);
+  const share=`${location.origin}${location.pathname}?seed=${seed}&score=${score}`;
+  say("CONTRACT TERMINATED.");
+  setTimeout(()=>alert(`DEAD\nTime: ${score}\nDaily Seed: ${seed}\n\nShare this run:\n${share}`),50);
+}
+update();
+
+// ===================== RNG =====================
+function hash(str){ let h=1779033703; for(let i=0;i<str.length;i++)h=Math.imul(h^str.charCodeAt(i),3432918353); return h; }
+function mulberry32(a){ return function(){ let t=a+=0x6D2B79F5; t=Math.imul(t^t>>>15,t|1); t^=t+Math.imul(t^t>>>7,t|61); return ((t^t>>>14)>>>0)/4294967296;}}
+
+// ===================== TWITCH INTEGRATION (OPTIONAL) =====================
+let CHANNEL = prompt("Enter your Twitch channel name (optional):");
+let client;
+function isSubOrVIP(tags){ return tags.subscriber || tags.badges?.vip; }
+
+if(CHANNEL){
+  client = new tmi.Client({connection:{secure:true,reconnect:true},channels:[CHANNEL]});
+  client.connect();
+  client.on("message",(chan,tags,msg,self)=>{
+    if(self||gameOver)return; msg=msg.toLowerCase();
+    if(voting){ if(msg==="1")votes[1]++; if(msg==="2")votes[2]++; return; }
+    if(isSubOrVIP(tags)){ if(msg==="!mercy"){ anger=Math.max(1,anger-0.5); subCount++; say("THE CONTRACT SHOWS MERCY."); clipFlash("green"); } }
+    if(msg==="!lava"){ lavaOn(8000); clipFlash("red"); }
+    if(msg==="!invert"){ invert(8000); clipFlash("blue"); }
+    if(msg==="!anger"){ anger+=0.2; clipFlash("orange"); }
+    if(msg==="!donate"){ anger+=0.5; donationCount++; say("THE CONTRACT THANKS YOU."); clipFlash("gold"); }
+  });
+}
+</script>
+
+</body>
+</html>
